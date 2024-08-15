@@ -1,16 +1,83 @@
 from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
-from prompt_toolkit import PromptSession
+from prompt_toolkit import PromptSession, print_formatted_text
 from prompt_toolkit.key_binding import KeyBindings
-from prompt_toolkit.application import run_in_terminal
 import questionary
 from datetime import datetime
+import logging
+import os
+
+'''
+%Y-%m-%d: Year-Month-Day (e.g., 2024-08-15).
+%H:%M:%S: Hour:Minute
+(e.g., 14:30:45).
+%A: Full weekday name (e.g., Thursday).
+'''
+
+###### folder init:
+# Check and create required folders
+init_folders = [
+    'logs', 
+    'journals'
+]
+
+# Ensure required directories exist
+LOG_DIRECTORY = 'logs'
+JOURNAL_DIRECTORY = 'journals'
+
+for directory in [LOG_DIRECTORY, JOURNAL_DIRECTORY]:
+    if not os.path.exists(directory):
+        os.makedirs(directory)
+
+# Initialize logging with different handlers for INFO and ERROR levels
+info_handler = logging.FileHandler(os.path.join(LOG_DIRECTORY, 'app_info.log'))
+error_handler = logging.FileHandler(os.path.join(LOG_DIRECTORY, 'app_error.log'))
+
+info_handler.setLevel(logging.INFO)
+error_handler.setLevel(logging.ERROR)
+
+formatter = logging.Formatter(
+    '%(asctime)s - %(levelname)s - %(message)s - [%(filename)s:%(lineno)d]',
+    datefmt='%Y-%m-%d %H:%M:%S %A'
+)
+
+info_handler.setFormatter(formatter)
+error_handler.setFormatter(formatter)
+
+logger = logging.getLogger()
+logger.setLevel(logging.DEBUG)  # Set the lowest level to capture all logs
+
+logger.addHandler(info_handler)
+logger.addHandler(error_handler)
 
 console = Console()
+bindings = KeyBindings()
+
+PROMPT_FLAG = False
+
+def time_info():
+    from datetime import datetime
+
+    # Get the current date, day, and time
+    now = datetime.now()
+
+    date_str = now.strftime("%Y-%m-%d")  # Format: YYYY-MM-DD
+    day_str = now.strftime("%A")          # Full weekday name (e.g., Monday)
+    time_str = now.strftime("%H-%M-%S")   # Format: HH-MM-SS
+
+    return date_str, day_str, time_str
+
+def app_init():
+    
+    os.system('cls' if os.name == 'nt' else 'clear') # Clearing screen
+    console.print(Panel(Text("Welcome to the Modern CLI", justify="center", style="bold magenta"))) # Welcome message
+
+
 
 def main_menu():
-    console.print(Panel(Text("Welcome to the Modern CLI", justify="center", style="bold magenta")))
+    
+    app_init()
 
     options = [
         "Option 1: Write Journal",
@@ -40,68 +107,107 @@ def main_menu():
     if choice == options[0]:
         write_journal()
     elif choice == options[1]:
-        console.print(Panel("Settings: Configure your preferences", title="Settings", style="bold yellow"))
+        configure_settings()
     elif choice == options[2]:
-        console.print(Panel("Process: The process has started", title="Process", style="bold blue"))
+        start_process()
     elif choice == options[3]:
-        console.print(Panel("Donate $$$ for this app development!", title="Exit", style="bold red"))
+        donate()
     elif choice == options[4]:
-        console.print(Panel("Exiting the application. Goodbye!", title="Exit", style="bold red"))
-        exit()
+        exit_app()
+
+def configure_settings():
+    console.print(Panel("Settings: Configure your preferences", title="Settings", style="bold yellow"))
+    # Implement settings logic
+
+def start_process():
+    console.print(Panel("Process: The process has started", title="Process", style="bold blue"))
+    # Implement process logic
+
+def donate():
+    console.print(Panel("Donate $$$ for this app development!", title="Donate", style="bold red"))
+    # Implement donation logic
+
+def exit_app():
+    console.print(Panel("Exiting the application. Goodbye!", title="Exit", style="bold red"))
+    os.system('cls' if os.name == 'nt' else 'clear')
+    exit()
 
 def write_journal():
     console.print(Panel("Journal Entry", title="Write Your Journal", style="bold green"))
 
     session = PromptSession()
-    bindings = KeyBindings()
 
     journal_entry = []
+    line_number = 1
+    global PROMPT_FLAG
+    PROMPT_FLAG = False
 
-    @bindings.add('c-s') # TODO: This 'ctrl + s' shit is not working 
-    def save_journal(event):
-        run_in_terminal(lambda: save_and_ask(journal_entry))
-        event.app.exit()
-
-
-    console.print("[bold yellow]Type your journal entry below. Press Ctrl + S or type 'save-me' to save.[/bold yellow]")
+    console.print("[bold yellow]Type your journal entry below. Press Ctrl + S to save automatically.[/bold yellow]")
     console.print("[bold red]Press Ctrl + C to cancel and return to the main menu.[/bold red]")
 
-    while True:
+    @bindings.add('c-s')
+    def save_journal(event):
+        global PROMPT_FLAG
+        save_and_ask(journal_entry)
+        console.print("[bold green]Press ENTER to return to main menu.[/bold green]")
+        # event.app.exit()
+        PROMPT_FLAG = True
+
+    while not PROMPT_FLAG:
         try:
-            line = session.prompt("> ", key_bindings=bindings)
+            prompt_text = f"{line_number}: "
+            line = session.prompt(prompt_text, key_bindings=bindings)
 
             if line and line.lower() == "save-me":
+                logging.info("User requested to save journal entry.")
                 save_and_ask(journal_entry)
                 ask_return_to_menu()
                 break
-            journal_entry.append(line)
+
+            if line:
+                journal_entry.append(line)
+                logging.debug(f"Appended line {line_number} to journal entry: {line}")
+                line_number += 1
 
         except KeyboardInterrupt:
             console.print(Panel("Exiting journal entry mode.", style="bold red"))
+            logging.warning("User exited journal entry mode with KeyboardInterrupt.")
             ask_return_to_menu()
             break
+
         except Exception as e:
-            console.print(Panel(f"ERROR:  {e}", style="bold red"))
+            console.print(Panel(f"ERROR: {e}", style="bold red"))
+            logging.error(f"An error occurred: {e}", exc_info=True)
             ask_return_to_menu()
             break
 
 def save_and_ask(journal_entry):
-    entry = '\n'.join(journal_entry)
-    if entry:
+    try:
+        sanitized_entries = [entry if entry is not None else '' for entry in journal_entry]
+        entry = '\n'.join(sanitized_entries)
+
         save_journal_to_file(entry)
-        console.print(Panel("Your journal entry has been saved.", style="bold green"))
-        ask_return_to_menu()
-    else:
-        console.print(Panel("No entry was written.", style="bold red"))
+        # console.print("Journal entry saved.", style="bold green")
+        logging.info("Journal entry successfully saved.")
+
+    except Exception as e:
+        console.print(Panel(f"ERROR saving journal: {e}", style="bold red"))
+        logging.error(f"An error occurred while saving the journal: {e}", exc_info=True)
 
 def save_journal_to_file(entry):
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    filename = f"journal_{timestamp}.txt"
+    filename = f"journals/journal_{timestamp}.txt"
+
     with open(filename, "w") as file:
         file.write(entry)
+        file.close()
+
+    os.system('cls' if os.name == 'nt' else 'clear')
     console.print(f"Journal saved as [bold yellow]{filename}[/bold yellow]")
+    logging.info(f"Journal saved as {filename}")
 
 def ask_return_to_menu():
+    
     return_to_menu = questionary.confirm("Would you like to return to the main menu?").ask()
     if return_to_menu:
         main_menu()
